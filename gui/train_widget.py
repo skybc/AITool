@@ -224,11 +224,11 @@ class TrainWidget(QWidget):
         model_layout.addWidget(QLabel("模型类型:"))
         self.model_combo = QComboBox()
         self.model_combo.addItems([
-            "nano (30MB - 最快)",
-            "small (50MB - 平衡)",
-            "medium (100MB - 精度高)",
-            "large (150MB - 更高精度)",
-            "xlarge (200MB - 最高精度)"
+            "nano (最快)",
+            "small (平衡)",
+            "medium (精度高)",
+            "large (更高精度)",
+            "xlarge (最高精度)"
         ])
         self.model_combo.setCurrentIndex(1)  # 默认选择small
         self.model_combo.setMinimumWidth(200)

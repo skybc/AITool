@@ -30,6 +30,12 @@ dist
 *.weights
 yolo11*.pt
 
+# 预训练模型存储（用户首次需要下载）
+# 注意：yolopt/11/ 在用户首次运行 download_models.py 后会自动生成
+# 这些文件太大（~500MB），不应纳入版本控制
+/yolopt
+yolopt/
+
 # Python 缓存
 __pycache__
 __pycache__/
@@ -86,6 +92,7 @@ Thumbs.db
 # ============= 注释 =============
 # data/ - 用户数据集，不应提交
 # results/ - 训练结果，文件太大
+# yolopt/ - 预训练模型，~500MB，用户首次需下载
 # *.pt - YOLO 模型权重，通常 100MB+
 # __pycache__/ - Python 编译缓存
 
