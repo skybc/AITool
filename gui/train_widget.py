@@ -223,9 +223,15 @@ class TrainWidget(QWidget):
         # 模型选择
         model_layout.addWidget(QLabel("模型类型:"))
         self.model_combo = QComboBox()
-        self.model_combo.addItems(["nano (最快)", "small (平衡)", "medium (精度高)"])
+        self.model_combo.addItems([
+            "nano (30MB - 最快)",
+            "small (50MB - 平衡)",
+            "medium (100MB - 精度高)",
+            "large (150MB - 更高精度)",
+            "xlarge (200MB - 最高精度)"
+        ])
         self.model_combo.setCurrentIndex(1)  # 默认选择small
-        self.model_combo.setMinimumWidth(150)
+        self.model_combo.setMinimumWidth(200)
         model_layout.addWidget(self.model_combo)
         
         model_layout.addStretch()
@@ -486,7 +492,7 @@ class TrainWidget(QWidget):
                 # 加载模型配置
                 if 'model' in config:
                     backbone = config['model'].get('backbone', 'small')
-                    idx = {'nano': 0, 'small': 1, 'medium': 2}.get(backbone, 1)
+                    idx = {'nano': 0, 'small': 1, 'medium': 2, 'large': 3, 'xlarge': 4}.get(backbone, 1)
                     self.model_combo.setCurrentIndex(idx)
                 
                 self.log("✅ 配置文件加载成功")
@@ -512,7 +518,7 @@ class TrainWidget(QWidget):
             config['loss']['cls_loss_weight'] = self.cls_loss_spin.value()
             
             # 更新模型类型
-            model_map = {0: 'nano', 1: 'small', 2: 'medium'}
+            model_map = {0: 'nano', 1: 'small', 2: 'medium', 3: 'large', 4: 'xlarge'}
             config['model']['backbone'] = model_map[self.model_combo.currentIndex()]
             
             # 保存
