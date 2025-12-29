@@ -61,22 +61,114 @@ class DefectDetector:
         self._init_model()
     
     def _init_model(self):
-        """初始化YOLO11模型"""
-        backbone = self.config['model']['backbone']  # nano/small/medium
-        num_classes = self.config['model']['num_classes']
-        pretrained = self.config['model']['pretrained']
+        """初始化YOLO模型"""
+        model_type = self.config['model'].get('type', 'yolo11')  # 模型类型
+        backbone = self.config['model']['backbone']  # nano/small/medium/large/xlarge
         
-        # 从 yolopt/11 目录加载预训练权重
-        yolopt_dir = Path('yolopt') / '11'
-        model_path = yolopt_dir / f'yolo11{backbone[0]}.pt'
+        # 模型名称映射表
+        # {版本: {大小: 模型文件名}}
+        # 注意：每个版本的命名规律略有不同
+        model_name_map = {
+            'yolo11': {
+                'nano': 'yolo11n.pt',      # yolo11n
+                'small': 'yolo11s.pt',     # yolo11s
+                'medium': 'yolo11m.pt',    # yolo11m
+                'large': 'yolo11l.pt',     # yolo11l
+                'xlarge': 'yolo11x.pt',    # yolo11x
+            },
+            'yolo9': {
+                'nano': 'yolov9t.pt',      # yolov9t (tiny)
+                'small': 'yolov9s.pt',     # yolov9s
+                'medium': 'yolov9m.pt',    # yolov9m
+                'large': 'yolov9c.pt',     # yolov9c (compact)
+                'xlarge': 'yolov9e.pt',    # yolov9e (extra)
+            },
+            'yolo8': {
+                'nano': 'yolov8n.pt',      # yolov8n
+                'small': 'yolov8s.pt',     # yolov8s
+                'medium': 'yolov8m.pt',    # yolov8m
+                'large': 'yolov8l.pt',     # yolov8l
+                'xlarge': 'yolov8x.pt',    # yolov8x
+            },
+            'yolo12': {
+                'nano': 'yolo12n.pt',      # yolo12n
+                'small': 'yolo12s.pt',     # yolo12s
+                'medium': 'yolo12m.pt',    # yolo12m
+                'large': 'yolo12l.pt',     # yolo12l
+                'xlarge': 'yolo12x.pt',    # yolo12x
+            },
+        }
+        
+        # 配置文件名映射表
+        # 根据模型文件名的最后一个字符确定config文件名
+        config_name_map = {
+            'yolo11': {
+                'nano': 'config_n.yaml',      # yolo11n -> config_n
+                'small': 'config_s.yaml',     # yolo11s -> config_s
+                'medium': 'config_m.yaml',    # yolo11m -> config_m
+                'large': 'config_l.yaml',     # yolo11l -> config_l
+                'xlarge': 'config_x.yaml',    # yolo11x -> config_x
+            },
+            'yolo9': {
+                'nano': 'config_t.yaml',      # yolov9t -> config_t
+                'small': 'config_s.yaml',     # yolov9s -> config_s
+                'medium': 'config_m.yaml',    # yolov9m -> config_m
+                'large': 'config_c.yaml',     # yolov9c -> config_c
+                'xlarge': 'config_e.yaml',    # yolov9e -> config_e
+            },
+            'yolo8': {
+                'nano': 'config_n.yaml',      # yolov8n -> config_n
+                'small': 'config_s.yaml',     # yolov8s -> config_s
+                'medium': 'config_m.yaml',    # yolov8m -> config_m
+                'large': 'config_l.yaml',     # yolov8l -> config_l
+                'xlarge': 'config_x.yaml',    # yolov8x -> config_x
+            },
+            'yolo12': {
+                'nano': 'config_n.yaml',      # yolo12n -> config_n
+                'small': 'config_s.yaml',     # yolo12s -> config_s
+                'medium': 'config_m.yaml',    # yolo12m -> config_m
+                'large': 'config_l.yaml',     # yolo12l -> config_l
+                'xlarge': 'config_x.yaml',    # yolo12x -> config_x
+            },
+        }
+        
+        # 版本到目录映射
+        version_dir_map = {
+            'yolo11': '11',
+            'yolo9': '9',
+            'yolo8': '8',
+            'yolo12': '12',
+        }
+        
+        # 获取模型文件名和配置文件名
+        if model_type not in model_name_map:
+            raise ValueError(f"不支持的模型类型: {model_type}。支持的类型: {list(model_name_map.keys())}")
+        
+        if backbone not in model_name_map[model_type]:
+            raise ValueError(f"{model_type} 不支持 {backbone} 大小。支持的大小: {list(model_name_map[model_type].keys())}")
+        
+        model_file_name = model_name_map[model_type][backbone]
+        config_file_name = config_name_map[model_type][backbone]
+        version_dir = version_dir_map.get(model_type, '11')
+        
+        # 从对应版本目录加载预训练权重
+        yolopt_dir = Path('yolopt') / version_dir
+        model_path = yolopt_dir / model_file_name
+        config_path = yolopt_dir / config_file_name
         
         if not model_path.exists():
             self.log(f"⚠️  预训练模型不存在: {model_path}")
             self.log(f"💡 请先运行: python download_models.py")
             raise FileNotFoundError(f"模型文件不存在: {model_path}")
         
+        if not config_path.exists():
+            self.log(f"⚠️  配置文件不存在: {config_path}")
+            self.log(f"💡 请检查配置文件: {config_path}")
+            raise FileNotFoundError(f"配置文件不存在: {config_path}")
+        
         self.model = YOLO(str(model_path))
-        self.log(f"✅ 已加载预训练模型: {model_path}")
+        self.log(f"✅ 已加载预训练模型: {model_path} ({model_type} - {backbone})")
+        self.log(f"✅ 已加载配置文件: {config_path}")
         
         # 设置为目标检测任务
         self.model.task = 'detect'

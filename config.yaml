@@ -30,10 +30,10 @@ loss:
   cls_loss_weight: 1.5
   dfl_loss_weight: 1.5
 model:
-  backbone: nano
+  backbone: medium
   num_classes: 1
   pretrained: true
-  type: yolov8
+  type: yolov11
 output:
   log_interval: 10
   save_best: true

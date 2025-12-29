@@ -166,9 +166,49 @@ class TrainThread(QThread):
 class TrainWidget(QWidget):
     """训练界面组件"""
     
+    # 模型版本到配置目录的映射
+    VERSION_CONFIG_DIR = {
+        0: "yolopt/11",  # YOLO11
+        1: "yolopt/9",   # YOLO9
+        2: "yolopt/8",   # YOLO8
+        3: "yolopt/12",  # YOLO12
+    }
+    
+    # 模型大小到配置文件的映射
+    # 注意：不同YOLO版本的配置文件名称不同
+    SIZE_CONFIG_MAP = {
+        0: {  # YOLO11
+            0: "config_n.yaml",      # nano
+            1: "config_s.yaml",      # small
+            2: "config_m.yaml",      # medium
+            3: "config_l.yaml",      # large
+            4: "config_x.yaml",      # xlarge
+        },
+        1: {  # YOLO9
+            0: "config_t.yaml",      # nano -> t (tiny)
+            1: "config_s.yaml",      # small
+            2: "config_m.yaml",      # medium
+            3: "config_c.yaml",      # large -> c (compact)
+            4: "config_e.yaml",      # xlarge -> e (extra)
+        },
+        2: {  # YOLO8
+            0: "config_n.yaml",      # nano
+            1: "config_s.yaml",      # small
+            2: "config_m.yaml",      # medium
+            3: "config_l.yaml",      # large
+            4: "config_x.yaml",      # xlarge
+        },
+        3: {  # YOLO12
+            0: "config_n.yaml",      # nano
+            1: "config_s.yaml",      # small
+            2: "config_m.yaml",      # medium
+            3: "config_l.yaml",      # large
+            4: "config_x.yaml",      # xlarge
+        },
+    }
+    
     def __init__(self):
         super().__init__()
-        self.config_path = "config.yaml"
         self.dataset_root = ""
         self.is_training = False
         self.train_thread = None
@@ -220,18 +260,26 @@ class TrainWidget(QWidget):
         
         model_layout.addSpacing(20)
         
-        # 模型选择
-        model_layout.addWidget(QLabel("模型类型:"))
+        # 模型版本选择
+        model_layout.addWidget(QLabel("YOLO版本:"))
+        self.version_combo = QComboBox()
+        self.version_combo.addItems(["YOLO11", "YOLO9", "YOLO8", "YOLO12"])
+        self.version_combo.setCurrentIndex(0)  # 默认选择YOLO11
+        self.version_combo.setMinimumWidth(100)
+        model_layout.addWidget(self.version_combo)
+        
+        # 模型大小选择
+        model_layout.addWidget(QLabel("模型大小:"))
         self.model_combo = QComboBox()
         self.model_combo.addItems([
-            "nano (最快)",
-            "small (平衡)",
-            "medium (精度高)",
-            "large (更高精度)",
-            "xlarge (最高精度)"
+            "最快",
+            "平衡",
+            "精度高",
+            "更高精度",
+            "最高精度"
         ])
         self.model_combo.setCurrentIndex(1)  # 默认选择small
-        self.model_combo.setMinimumWidth(200)
+        self.model_combo.setMinimumWidth(180)
         model_layout.addWidget(self.model_combo)
         
         model_layout.addStretch()
@@ -472,8 +520,9 @@ class TrainWidget(QWidget):
     def _load_config(self):
         """加载配置文件"""
         try:
-            if os.path.exists(self.config_path):
-                with open(self.config_path, 'r', encoding='utf-8') as f:
+            config_path = self._get_config_path()
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
                     config = yaml.safe_load(f)
                 
                 # 加载训练参数
@@ -489,21 +538,18 @@ class TrainWidget(QWidget):
                     self.box_loss_spin.setValue(config['loss'].get('box_loss_weight', 7.5))
                     self.cls_loss_spin.setValue(config['loss'].get('cls_loss_weight', 1.5))
                 
-                # 加载模型配置
-                if 'model' in config:
-                    backbone = config['model'].get('backbone', 'small')
-                    idx = {'nano': 0, 'small': 1, 'medium': 2, 'large': 3, 'xlarge': 4}.get(backbone, 1)
-                    self.model_combo.setCurrentIndex(idx)
-                
-                self.log("✅ 配置文件加载成功")
+                self.log(f"✅ 配置文件加载成功: {config_path}")
+            else:
+                self.log(f"⚠️ 配置文件不存在: {config_path}")
         except Exception as e:
             self.log(f"⚠️ 加载配置文件失败: {e}")
     
     def _save_config(self):
         """保存配置到文件"""
         try:
+            config_path = self._get_config_path()
             # 读取现有配置
-            with open(self.config_path, 'r', encoding='utf-8') as f:
+            with open(config_path, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
             
             # 更新训练参数
@@ -517,19 +563,41 @@ class TrainWidget(QWidget):
             config['loss']['box_loss_weight'] = self.box_loss_spin.value()
             config['loss']['cls_loss_weight'] = self.cls_loss_spin.value()
             
-            # 更新模型类型
-            model_map = {0: 'nano', 1: 'small', 2: 'medium', 3: 'large', 4: 'xlarge'}
-            config['model']['backbone'] = model_map[self.model_combo.currentIndex()]
-            
             # 保存
-            with open(self.config_path, 'w', encoding='utf-8') as f:
+            with open(config_path, 'w', encoding='utf-8') as f:
                 yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
             
-            self.log("✅ 配置已保存")
+            self.log(f"✅ 配置已保存到: {config_path}")
             return True
         except Exception as e:
             self.log(f"❌ 保存配置失败: {e}")
             return False
+    
+    def _get_config_path(self):
+        """获取当前模型对应的配置文件路径
+        
+        Returns:
+            str: 配置文件路径
+        """
+        version_index = self.version_combo.currentIndex()
+        size_index = self.model_combo.currentIndex()
+        
+        # 从版本和大小索引获取配置文件名
+        version_dir = self.VERSION_CONFIG_DIR.get(version_index, self.VERSION_CONFIG_DIR[0])
+        
+        # SIZE_CONFIG_MAP 现在是 {version_index: {size_index: config_name}}
+        if version_index in self.SIZE_CONFIG_MAP:
+            size_config_map = self.SIZE_CONFIG_MAP[version_index]
+            if size_index in size_config_map:
+                size_file = size_config_map[size_index]
+            else:
+                # 默认使用 small
+                size_file = size_config_map.get(1, "config_s.yaml")
+        else:
+            # 默认使用 YOLO11 的 small
+            size_file = self.SIZE_CONFIG_MAP[0].get(1, "config_s.yaml")
+        
+        return f"{version_dir}/{size_file}"
     
     def _setup_connections(self):
         """设置信号连接"""
@@ -537,6 +605,9 @@ class TrainWidget(QWidget):
         self.train_btn.clicked.connect(self.start_training)
         self.stop_btn.clicked.connect(self.stop_training)
         self.output_btn.clicked.connect(self.select_output_dir)
+        # 模型版本或大小改变时，重新加载对应的配置文件
+        self.version_combo.currentIndexChanged.connect(self.on_model_changed)
+        self.model_combo.currentIndexChanged.connect(self.on_model_changed)
     
     def select_dataset(self):
         """选择数据集目录"""
@@ -612,6 +683,8 @@ class TrainWidget(QWidget):
         self.train_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self.select_data_btn.setEnabled(False)
+        self.version_combo.setEnabled(False)  # 训练中禁用版本选择
+        self.model_combo.setEnabled(False)    # 训练中禁用模型选择
         self.log_text.clear()
         
         # 重置进度显示和消费者
@@ -624,8 +697,9 @@ class TrainWidget(QWidget):
         self.size_label.setText("640")
         
         # 创建并启动训练线程
+        config_path = self._get_config_path()
         output_dir = self.output_edit.text()
-        self.train_thread = TrainThread(self.config_path, self.dataset_root, output_dir)
+        self.train_thread = TrainThread(config_path, self.dataset_root, output_dir)
         self.train_thread.log_signal.connect(self.log)
         self.train_thread.finished_signal.connect(self.on_training_finished)
         
@@ -715,6 +789,13 @@ class TrainWidget(QWidget):
                 self.train_thread.wait()
                 self.on_training_finished(False, "用户取消")
     
+    def on_model_changed(self, index):
+        """模型选择改变时的处理函数"""
+        if not self.is_training:
+            # 只在不训练时重新加载配置
+            self.log(f"📋 模型已改变，加载对应的配置文件...")
+            self._load_config()
+    
     def on_training_finished(self, success, message):
         """训练完成回调"""
         # 停止进度轮询定时器
@@ -726,6 +807,8 @@ class TrainWidget(QWidget):
         self.train_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.select_data_btn.setEnabled(True)
+        self.version_combo.setEnabled(True)  # 训练完成后重新启用版本选择
+        self.model_combo.setEnabled(True)    # 训练完成后重新启用模型选择
         
         # 清理线程
         if self.train_thread:
