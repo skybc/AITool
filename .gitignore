@@ -1,0 +1,110 @@
+# Git 忽略规则
+# 本项目不提交的文件和目录
+
+## 数据集和结果目录
+data/                          # 数据集目录（不上传训练数据）
+results/                       # 训练结果目录（包含模型、日志等）
+build/                         # PyInstaller 编译输出
+build_temp/                    # PyInstaller 临时目录
+
+## Python 缓存
+__pycache__/                   # Python 字节码缓存
+*.py[cod]                      # Python 编译文件
+*$py.class                     # Python 类缓存
+*.so                           # Python C 扩展
+
+## 虚拟环境
+venv/                          # Python 虚拟环境
+env/                           # 另一种虚拟环境名称
+ENV/                           # 环境变量文件目录
+.venv/                         # PyCharm 虚拟环境
+
+## IDE 配置
+.vscode/                       # VS Code 配置
+.idea/                         # PyCharm 配置
+*.swp                          # Vim 交换文件
+*.swo                          # Vim 交换文件
+*~                             # Vim 备份文件
+.DS_Store                      # macOS 文件夹配置
+
+## 模型文件
+*.pt                           # YOLO 权重文件（大文件）
+*.pth                          # PyTorch 模型文件
+*.ckpt                         # 检查点文件
+*.weights                      # 权重文件
+
+## 日志文件
+*.log                          # 日志文件
+*.log.*                        # 轮换日志文件
+logs/                          # 日志目录
+
+## 编译和生成的文件
+*.egg-info/                    # Python 包信息
+dist/                          # 发布包目录
+build/                         # 构建输出目录
+*.exe                          # 可执行文件
+*.dll                          # Windows DLL
+
+## OS 临时文件
+.DS_Store                      # macOS
+Thumbs.db                      # Windows 缩略图缓存
+.directory                     # Linux 目录配置
+
+## 项目特定的临时文件
+*.tmp                          # 临时文件
+*.temp                         # 临时文件
+.~*                            # Office 临时文件
+*.bak                          # 备份文件
+
+## Jupyter Notebook
+.ipynb_checkpoints/            # Jupyter 检查点
+*.ipynb                        # Notebook 文件（可选）
+
+## 系统文件
+.env                           # 环境变量文件（包含敏感信息）
+.env.local                     # 本地环境变量
+
+## IDE 工作空间
+*.workspace                    # 工作空间配置
+.project                       # Eclipse 项目文件
+.settings/                     # Eclipse 设置目录
+
+## 数据文件（除了示例）
+*.csv                          # 如果包含敏感数据
+*.xlsx                         # Excel 文件
+*.xls                          # Excel 文件
+
+## 媒体文件（如果太大）
+# *.mp4                        # 视频文件（取消注释以忽略）
+# *.mov                        # 视频文件（取消注释以忽略）
+# *.jpg                        # 图片文件（取消注释以忽略）
+# *.png                        # 图片文件（取消注释以忽略）
+
+## 编译警告
+.pytest_cache/                 # pytest 缓存
+.coverage                      # 代码覆盖报告
+htmlcov/                       # HTML 覆盖报告
+
+## 保留但忽略内容的目录
+# 保持目录结构但忽略内容
+data/.gitkeep                  # 保持 data 目录（但忽略内容）
+results/.gitkeep              # 保持 results 目录（但忽略内容）
+
+# 注释说明
+# 
+# 1. data/ - 包含用户的训练数据，不应提交到版本控制
+#    - images/train, val, test - 训练/验证/测试图片
+#    - labels/train, val, test - 对应的标签
+#
+# 2. results/ - 包含训练结果，文件可能很大
+#    - 模型权重文件（*.pt）
+#    - 训练日志
+#    - 其他中间结果
+#
+# 3. build/ - PyInstaller 编译输出，本地生成
+#
+# 4. __pycache__ - Python 编译缓存，每个环境不同
+#
+# 5. .vscode/, .idea/ - IDE 个人配置，不应共享
+#
+# 为了保留目录结构，可以在目录下放置 .gitkeep 文件
