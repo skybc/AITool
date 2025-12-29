@@ -66,11 +66,17 @@ class DefectDetector:
         num_classes = self.config['model']['num_classes']
         pretrained = self.config['model']['pretrained']
         
-        # 使用官方预训练权重
-        model_name = f"yolo11{backbone[0]}.pt"  # yolo11n.pt, yolo11s.pt, etc.
+        # 从 yolopt/11 目录加载预训练权重
+        yolopt_dir = Path('yolopt') / '11'
+        model_path = yolopt_dir / f'yolo11{backbone[0]}.pt'
         
-        self.model = YOLO(model_name)
-        self.log(f"✅ 已加载预训练模型: {model_name}")
+        if not model_path.exists():
+            self.log(f"⚠️  预训练模型不存在: {model_path}")
+            self.log(f"💡 请先运行: python download_models.py")
+            raise FileNotFoundError(f"模型文件不存在: {model_path}")
+        
+        self.model = YOLO(str(model_path))
+        self.log(f"✅ 已加载预训练模型: {model_path}")
         
         # 设置为目标检测任务
         self.model.task = 'detect'
@@ -174,13 +180,35 @@ class DefectDetector:
             amp=cfg['training']['mixed_precision'],  # 混合精度
         )
         
-        # 保存最优模型
+        # 保存最优模型到结果目录和数据目录
         best_model_path = self.output_dir / 'yolo11_defect' / 'weights' / 'best.pt'
         if best_model_path.exists():
-            final_path = self.output_dir / 'best.pt'
             import shutil
+            
+            # 1. 保存到结果目录
+            final_path = self.output_dir / 'best.pt'
             shutil.copy(best_model_path, final_path)
-            self.log(f"\n✅ 训练完成! 最优模型已保存到: {final_path}")
+            self.log(f"\n✅ 最优模型已保存到: {final_path}")
+            
+            # 2. 拷贝到数据集目录（方便用户查找）
+            dataset_root = Path(dataset_root).resolve()
+            data_model_dir = dataset_root / 'models'
+            data_model_dir.mkdir(exist_ok=True)
+            
+            data_model_path = data_model_dir / 'best.pt'
+            shutil.copy(best_model_path, data_model_path)
+            self.log(f"✅ 最优模型已拷贝到: {data_model_path}")
+            
+            # 3. 同时拷贝最后一个epoch的模型
+            last_model_path = self.output_dir / 'yolo11_defect' / 'weights' / 'last.pt'
+            if last_model_path.exists():
+                last_copy_path = data_model_dir / 'last.pt'
+                shutil.copy(last_model_path, last_copy_path)
+                self.log(f"✅ 最后模型已拷贝到: {last_copy_path}")
+            
+            self.log(f"\n📁 所有模型位置:")
+            self.log(f"  - 结果目录: {self.output_dir}")
+            self.log(f"  - 数据目录: {data_model_dir}")
         
         return results
     
