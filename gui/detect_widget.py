@@ -199,15 +199,10 @@ class DetectWidget(QWidget):
         # 右侧：图片查看器
         viewer_group = QGroupBox("图片预览")
         viewer_layout = QVBoxLayout()
+        viewer_layout.setContentsMargins(0, 0, 0, 0)  # 移除边距，让图片铺满
         
         self.image_viewer = ImageViewer()
         viewer_layout.addWidget(self.image_viewer)
-        
-        # 图片信息
-        self.image_info_label = QLabel("鼠标滚轮缩放 | 右键拖动移动")
-        self.image_info_label.setStyleSheet("color: #666; padding: 5px;")
-        self.image_info_label.setAlignment(Qt.AlignCenter)
-        viewer_layout.addWidget(self.image_info_label)
         
         viewer_group.setLayout(viewer_layout)
         splitter.addWidget(viewer_group)
@@ -470,14 +465,6 @@ class DetectWidget(QWidget):
             # 如果有检测结果，显示结果
             if file_path in self.image_results:
                 self.image_viewer.set_detections(self.image_results[file_path])
-                
-                # 更新信息标签
-                det_count = len(self.image_results[file_path])
-                self.image_info_label.setText(
-                    f"检测到 {det_count} 个目标 | 鼠标滚轮缩放 | 右键拖动移动"
-                )
-            else:
-                self.image_info_label.setText("鼠标滚轮缩放 | 右键拖动移动")
     
     def start_detection(self):
         """开始检测"""
@@ -565,10 +552,6 @@ class DetectWidget(QWidget):
         # 如果是当前显示的图片，更新显示
         if image_path == self.current_image_path:
             self.image_viewer.set_detections(detections)
-            det_count = len(detections)
-            self.image_info_label.setText(
-                f"检测到 {det_count} 个目标 | 鼠标滚轮缩放 | 右键拖动移动"
-            )
     
     def on_detection_finished(self, success, message):
         """检测完成"""

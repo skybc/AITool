@@ -6,7 +6,7 @@
 import cv2
 import numpy as np
 from PySide6.QtWidgets import QWidget, QLabel
-from PySide6.QtCore import Qt, QPoint, QRect, Signal
+from PySide6.QtCore import Qt, QPoint, QPointF, QRect, Signal
 from PySide6.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QWheelEvent, QMouseEvent
 
 
@@ -18,7 +18,7 @@ class ImageViewer(QWidget):
         self.image = None  # 原始图像 (numpy array)
         self.detections = []  # 检测结果列表
         self.scale = 1.0  # 缩放比例
-        self.offset = QPoint(0, 0)  # 偏移量
+        self.offset = QPointF(0, 0)  # 偏移量（使用浮点坐标）
         self.last_pos = QPoint()  # 鼠标上次位置
         self.is_dragging = False  # 是否正在拖动
         
@@ -43,7 +43,7 @@ class ImageViewer(QWidget):
             
             # 重置视图
             self.scale = 1.0
-            self.offset = QPoint(0, 0)
+            self.offset = QPointF(0, 0)
             self.detections = []
             
             # 自适应缩放
@@ -69,7 +69,7 @@ class ImageViewer(QWidget):
         self.image = None
         self.detections = []
         self.scale = 1.0
-        self.offset = QPoint(0, 0)
+        self.offset = QPointF(0, 0)
         self.update()
     
     def _fit_to_window(self):
@@ -89,9 +89,9 @@ class ImageViewer(QWidget):
         # 居中显示
         scaled_w = int(img_w * self.scale)
         scaled_h = int(img_h * self.scale)
-        self.offset = QPoint(
-            (widget_w - scaled_w) // 2,
-            (widget_h - scaled_h) // 2
+        self.offset = QPointF(
+            (widget_w - scaled_w) / 2,
+            (widget_h - scaled_h) / 2
         )
     
     def paintEvent(self, event):
@@ -137,7 +137,7 @@ class ImageViewer(QWidget):
             Qt.SmoothTransformation
         )
         
-        painter.drawPixmap(self.offset, scaled_pixmap)
+        painter.drawPixmap(self.offset.toPoint(), scaled_pixmap)
     
     def _draw_detections_on_image(self, rgb_image):
         """在图片上绘制检测结果
@@ -196,11 +196,12 @@ class ImageViewer(QWidget):
         if self.image is None:
             return
         
-        # 获取鼠标位置
-        mouse_pos = event.position().toPoint()
+        # 获取鼠标位置（浮点坐标）
+        mouse_pos = QPointF(event.position())
         
         # 计算缩放前鼠标在图片上的相对位置
-        old_pos = (mouse_pos - self.offset) / self.scale
+        old_pos_x = (mouse_pos.x() - self.offset.x()) / self.scale
+        old_pos_y = (mouse_pos.y() - self.offset.y()) / self.scale
         
         # 缩放
         delta = event.angleDelta().y()
@@ -213,8 +214,9 @@ class ImageViewer(QWidget):
         self.scale = max(0.1, min(self.scale, 10.0))
         
         # 计算新的偏移量，使鼠标位置保持不变
-        new_offset = mouse_pos - old_pos * self.scale
-        self.offset = new_offset.toPoint()
+        new_offset_x = mouse_pos.x() - old_pos_x * self.scale
+        new_offset_y = mouse_pos.y() - old_pos_y * self.scale
+        self.offset = QPointF(new_offset_x, new_offset_y)
         
         self.update()
     
@@ -229,7 +231,7 @@ class ImageViewer(QWidget):
         """鼠标移动事件 - 拖动"""
         if self.is_dragging:
             delta = event.pos() - self.last_pos
-            self.offset += delta
+            self.offset += QPointF(delta.x(), delta.y())
             self.last_pos = event.pos()
             self.update()
     

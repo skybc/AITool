@@ -685,6 +685,18 @@ class TrainWidget(QWidget):
         self.select_data_btn.setEnabled(False)
         self.version_combo.setEnabled(False)  # 训练中禁用版本选择
         self.model_combo.setEnabled(False)    # 训练中禁用模型选择
+        
+        # 保持参数输入框可用，允许用户在训练过程中实时调整参数（下次训练生效）
+        self.epochs_spin.setEnabled(True)
+        self.batch_spin.setEnabled(True)
+        self.lr_spin.setEnabled(True)
+        self.wd_spin.setEnabled(True)
+        self.warmup_spin.setEnabled(True)
+        self.box_loss_spin.setEnabled(True)
+        self.cls_loss_spin.setEnabled(True)
+        self.output_edit.setEnabled(True)
+        self.output_btn.setEnabled(True)
+        
         self.log_text.clear()
         
         # 重置进度显示和消费者
@@ -809,6 +821,17 @@ class TrainWidget(QWidget):
         self.select_data_btn.setEnabled(True)
         self.version_combo.setEnabled(True)  # 训练完成后重新启用版本选择
         self.model_combo.setEnabled(True)    # 训练完成后重新启用模型选择
+        
+        # 确保所有参数输入框保持启用
+        self.epochs_spin.setEnabled(True)
+        self.batch_spin.setEnabled(True)
+        self.lr_spin.setEnabled(True)
+        self.wd_spin.setEnabled(True)
+        self.warmup_spin.setEnabled(True)
+        self.box_loss_spin.setEnabled(True)
+        self.cls_loss_spin.setEnabled(True)
+        self.output_edit.setEnabled(True)
+        self.output_btn.setEnabled(True)
         
         # 清理线程
         if self.train_thread:
