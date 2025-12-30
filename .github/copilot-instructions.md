@@ -7,7 +7,7 @@
 - YOLO11 (ultralytics) - Object detection backbone
 - PySide6 - GUI framework
 - PyTorch - Deep learning framework
-- Python 3.11+ with conda environment
+- Python 3.9+ with conda environment
 
 ---
 

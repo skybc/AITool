@@ -6,10 +6,7 @@
 import os
 import yaml
 from pathlib import Path
-import io
-import sys
-import re
-from contextlib import redirect_stdout
+from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -27,159 +24,14 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
 )
-from PySide6.QtCore import Qt, Signal, QThread, QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 
 import sys
 
 sys.path.append(str(Path(__file__).parent.parent))
-from core.train import YoloDetector
-from core.output_consumer import OutputConsumer, OutputConsumerManager
-from core.output_logger import OutputLogger, TeeWriter
+from gui.train_thread import TrainThread
 from gui.training_progress_consumer import TrainingProgressConsumer
-
-
-class TrainThread(QThread):
-    """训练线程"""
-
-    log_signal = Signal(str)
-    finished_signal = Signal(bool, str)  # success, message
-
-    def __init__(self, config_path, dataset_root, output_dir):
-        super().__init__()
-        self.config_path = config_path
-        self.dataset_root = dataset_root
-        self.output_dir = output_dir
-        self.is_running = True
-        self.trainer = None  # 用于存储 trainer 引用
-        self.output_buffer = io.StringIO()  # 用于捕获 print 输出
-
-        # 输出消费者管理器
-        self.consumer_manager = OutputConsumerManager()
-
-    def register_output_consumer(self, consumer: OutputConsumer) -> None:
-        """注册输出消费者
-
-        Args:
-            consumer: OutputConsumer 实例
-        """
-        self.consumer_manager.register(consumer)
-
-    def unregister_output_consumer(self, consumer: OutputConsumer) -> None:
-        """注销输出消费者
-
-        Args:
-            consumer: 要注销的 OutputConsumer 实例
-        """
-        self.consumer_manager.unregister(consumer)
-
-    def run(self):
-        """执行训练"""
-        try:
-            self.log_signal.emit("=" * 60)
-            self.log_signal.emit("开始训练...")
-            self.log_signal.emit(f"配置文件: {self.config_path}")
-            self.log_signal.emit(f"数据集: {self.dataset_root}")
-            self.log_signal.emit(f"输出目录: {self.output_dir}")
-            self.log_signal.emit("=" * 60 + "\n")
-
-            # 验证数据集
-            from pathlib import Path
-
-            dataset_path = Path(self.dataset_root)
-            data_yaml = dataset_path / "data.yaml"
-
-            if not data_yaml.exists():
-                raise FileNotFoundError(f"data.yaml 不存在: {data_yaml}")
-
-            # 验证images目录
-            images_dir = dataset_path / "images"
-            if not images_dir.exists():
-                raise FileNotFoundError(f"images 目录不存在: {images_dir}")
-
-            train_dir = images_dir / "train"
-            val_dir = images_dir / "val"
-
-            if not train_dir.exists():
-                raise FileNotFoundError(f"images/train 目录不存在: {train_dir}")
-            if not val_dir.exists():
-                raise FileNotFoundError(f"images/val 目录不存在: {val_dir}")
-
-            train_count = len(list(train_dir.glob("*.jpg"))) + len(
-                list(train_dir.glob("*.png"))
-            )
-            val_count = len(list(val_dir.glob("*.jpg"))) + len(
-                list(val_dir.glob("*.png"))
-            )
-
-            if train_count == 0:
-                raise ValueError(f"训练目录中没有图片: {train_dir}")
-            if val_count == 0:
-                raise ValueError(f"验证目录中没有图片: {val_dir}")
-
-            self.log_signal.emit(f"✅ 数据集验证通过")
-            self.log_signal.emit(f"   - 训练图片: {train_count} 张")
-            self.log_signal.emit(f"   - 验证图片: {val_count} 张\n")
-
-            # 创建训练器
-            self.log_signal.emit("📊 初始化模型...")
-            self.trainer = YoloDetector(self.config_path, self.output_dir)
-
-            # 开始训练，同时捕获输出并记录日志
-            self.log_signal.emit("\n🚀 开始训练...\n")
-
-            # 创建分流写入器：写到StringIO（用于消费者解析）和日志文件
-            tee_writer = OutputLogger.create_tee_writer(
-                string_buffer=self.output_buffer, log_dir=Path(self.output_dir)
-            )
-
-            # 将stdout重定向到TeeWriter
-            old_stdout = sys.stdout
-            sys.stdout = tee_writer
-
-            try:
-                results = self.trainer.train(self.dataset_root)
-            finally:
-                # 恢复stdout
-                sys.stdout = old_stdout
-                tee_writer.flush()
-
-            # 训练完成，通知所有消费者
-            self.consumer_manager.notify_training_end()
-
-            if results:
-                self.log_signal.emit("\n" + "=" * 60)
-                self.log_signal.emit("✅ 训练完成！")
-                self.log_signal.emit("=" * 60)
-                self.finished_signal.emit(True, "训练完成")
-            else:
-                self.finished_signal.emit(False, "训练失败")
-
-        except FileNotFoundError as e:
-            error_msg = f"文件或目录未找到: {str(e)}"
-            self.log_signal.emit(f"\n❌ {error_msg}")
-            self.log_signal.emit("\n数据集应该包含以下结构:")
-            self.log_signal.emit("dataset/")
-            self.log_signal.emit("├── data.yaml")
-            self.log_signal.emit("└── images/")
-            self.log_signal.emit("    ├── train/  (训练图片)")
-            self.log_signal.emit("    └── val/    (验证图片)")
-            self.finished_signal.emit(False, error_msg)
-        except ValueError as e:
-            error_msg = f"数据验证失败: {str(e)}"
-            self.log_signal.emit(f"\n❌ {error_msg}")
-            self.finished_signal.emit(False, error_msg)
-        except Exception as e:
-            error_msg = f"训练出错: {str(e)}"
-            self.log_signal.emit(f"\n❌ {error_msg}")
-            import traceback
-
-            self.log_signal.emit(f"\n详细信息:\n{traceback.format_exc()}")
-            self.finished_signal.emit(False, error_msg)
-
-    def stop(self):
-        """停止训练"""
-        self.is_running = False
 
 
 class TrainWidget(QWidget):
@@ -203,9 +55,27 @@ class TrainWidget(QWidget):
         # 创建训练进度消费者
         self.progress_consumer = TrainingProgressConsumer()
 
+        # 训练耗时跟踪
+        self.training_start_time = None
+        self.last_epoch_number = None
+        self.last_epoch_timestamp = None
+        self.epoch_time_accum = 0.0
+        self.epoch_count = 0
+        self.total_epochs_seen = None
+
+        # 任务选项 (显示文本, YOLO task 名)
+        self.task_options = [
+            ("检测", "detect"),
+            ("分割", "segment"),
+            ("分类", "classify"),
+            ("姿势估计", "pose"),
+            ("定向检测", "obb"),
+        ]
+
         self._init_ui()
         self._load_config()
         self._setup_connections()
+        self._update_task_combo_state()
 
     def _init_ui(self):
         """初始化UI"""
@@ -253,6 +123,16 @@ class TrainWidget(QWidget):
         self.version_combo.setCurrentIndex(0)  # 默认选择YOLO11
         self.version_combo.setMinimumWidth(100)
         model_layout.addWidget(self.version_combo)
+
+        # 任务类型选择
+        model_layout.addSpacing(12)
+        model_layout.addWidget(QLabel("任务:"))
+        self.task_combo = QComboBox()
+        for label, value in self.task_options:
+            self.task_combo.addItem(label, userData=value)
+        self.task_combo.setCurrentIndex(0)
+        self.task_combo.setMinimumWidth(120)
+        model_layout.addWidget(self.task_combo)
 
         # 模型大小选择
         model_layout.addWidget(QLabel("模型大小:"))
@@ -408,6 +288,17 @@ class TrainWidget(QWidget):
         self.size_label.setStyleSheet("color: #666666; font-weight: bold;")
         progress_grid.addWidget(self.size_label, 2, 1)
 
+        # 第四行：耗时与预计耗时
+        progress_grid.addWidget(QLabel("耗时:"), 3, 0)
+        self.elapsed_label = QLabel("00:00:00")
+        self.elapsed_label.setStyleSheet("color: #0066cc; font-weight: bold;")
+        progress_grid.addWidget(self.elapsed_label, 3, 1)
+
+        progress_grid.addWidget(QLabel("预计耗时:"), 3, 2)
+        self.eta_label = QLabel("--:--:--")
+        self.eta_label.setStyleSheet("color: #00aa00; font-weight: bold;")
+        progress_grid.addWidget(self.eta_label, 3, 3)
+
         progress_widget.setLayout(progress_grid)
         log_layout.addWidget(progress_widget)
 
@@ -443,67 +334,90 @@ class TrainWidget(QWidget):
         val_count = 0
         test_count = 0
 
+        task = self._get_selected_task()
+
         # 检查data.yaml
         data_yaml = dataset_path / "data.yaml"
         if not data_yaml.exists():
             errors.append("❌ 缺少 data.yaml")
+            return {
+                "valid": False,
+                "errors": "\n".join(errors),
+                "train_count": 0,
+                "val_count": 0,
+                "test_count": 0,
+            }
 
-        # 检查images目录
-        images_dir = dataset_path / "images"
-        if not images_dir.exists():
-            errors.append("❌ 缺少 images 目录")
+        try:
+            with open(data_yaml, "r", encoding="utf-8") as f:
+                data_cfg = yaml.safe_load(f) or {}
+        except Exception as exc:
+            errors.append(f"❌ 解析 data.yaml 失败: {exc}")
+            return {
+                "valid": False,
+                "errors": "\n".join(errors),
+                "train_count": 0,
+                "val_count": 0,
+                "test_count": 0,
+            }
+
+        base_path_val = data_cfg.get("path", ".")
+        data_dir = data_yaml.parent
+
+        def _resolve_path(entry):
+            path_obj = Path(entry)
+            if path_obj.is_absolute():
+                return path_obj
+            return (data_dir / base_path_val / path_obj).resolve()
+
+        def _count_images(folder: Path):
+            if not folder.exists():
+                return 0
+            return len(
+                [
+                    p
+                    for p in folder.rglob("*")
+                    if p.suffix.lower() in [".jpg", ".jpeg", ".png", ".bmp"]
+                ]
+            )
+
+        train_entry = data_cfg.get("train")
+        val_entry = data_cfg.get("val")
+        test_entry = data_cfg.get("test")
+
+        if not train_entry or not val_entry:
+            errors.append("❌ data.yaml 缺少 train/val 定义")
         else:
-            # 检查train
-            train_dir = images_dir / "train"
-            if not train_dir.exists():
-                errors.append("❌ 缺少 images/train 目录")
+            train_path = _resolve_path(train_entry)
+            val_path = _resolve_path(val_entry)
+
+            if not train_path.exists():
+                errors.append(f"❌ 训练集不存在: {train_path}")
             else:
-                train_files = list(train_dir.glob("*"))
-                train_count = len(
-                    [
-                        f
-                        for f in train_files
-                        if f.suffix.lower() in [".jpg", ".png", ".jpeg"]
-                    ]
-                )
+                train_count = _count_images(train_path)
                 if train_count == 0:
-                    errors.append("⚠️  images/train 目录为空")
+                    errors.append("⚠️  训练集为空")
 
-            # 检查val
-            val_dir = images_dir / "val"
-            if not val_dir.exists():
-                errors.append("❌ 缺少 images/val 目录")
+            if not val_path.exists():
+                errors.append(f"❌ 验证集不存在: {val_path}")
             else:
-                val_files = list(val_dir.glob("*"))
-                val_count = len(
-                    [
-                        f
-                        for f in val_files
-                        if f.suffix.lower() in [".jpg", ".png", ".jpeg"]
-                    ]
-                )
+                val_count = _count_images(val_path)
                 if val_count == 0:
-                    errors.append("⚠️  images/val 目录为空")
+                    errors.append("⚠️  验证集为空")
 
-            # 检查test（可选）
-            test_dir = images_dir / "test"
-            if test_dir.exists():
-                test_files = list(test_dir.glob("*"))
-                test_count = len(
-                    [
-                        f
-                        for f in test_files
-                        if f.suffix.lower() in [".jpg", ".png", ".jpeg"]
-                    ]
-                )
+        if test_entry:
+            test_path = _resolve_path(test_entry)
+            if test_path.exists():
+                test_count = _count_images(test_path)
 
-        # 检查labels目录（可选，YOLO格式）
-        labels_dir = dataset_path / "labels"
-        if labels_dir.exists():
-            if not (labels_dir / "train").exists():
-                errors.append("⚠️  labels/train 目录缺少")
-            if not (labels_dir / "val").exists():
-                errors.append("⚠️  labels/val 目录缺少")
+        # 检查 labels 目录（检测/分割/姿态/OBB 常见结构，分类可忽略）
+        if task in ["detect", "segment", "pose", "obb"]:
+            labels_dir = dataset_path / "labels"
+            if labels_dir.exists():
+                if not (labels_dir / "train").exists():
+                    errors.append("⚠️  labels/train 目录缺少")
+                if not (labels_dir / "val").exists():
+                    errors.append("⚠️  labels/val 目录缺少")
 
         valid = not any("❌" in e for e in errors)
 
@@ -521,7 +435,7 @@ class TrainWidget(QWidget):
             config_path = self._get_config_path()
             if os.path.exists(config_path):
                 with open(config_path, "r", encoding="utf-8") as f:
-                    config = yaml.safe_load(f)
+                    config = yaml.safe_load(f) or {}
 
                 # 加载训练参数
                 if "training" in config:
@@ -543,6 +457,14 @@ class TrainWidget(QWidget):
                         config["training"].get("cls", 1.5)
                     )
 
+                # 任务选择
+                task_val = config.get("task", "detect")
+                for idx, (_, value) in enumerate(self.task_options):
+                    if value == task_val:
+                        self.task_combo.setCurrentIndex(idx)
+                        break
+                self._update_task_combo_state()
+
                 self.log(f"✅ 配置文件加载成功: {config_path}")
             else:
                 self.log(f"⚠️ 配置文件不存在: {config_path}")
@@ -555,13 +477,20 @@ class TrainWidget(QWidget):
             config_path = self._get_config_path()
             # 读取现有配置
             with open(config_path, "r", encoding="utf-8") as f:
-                config = yaml.safe_load(f)
+                config = yaml.safe_load(f) or {}
+
+            config.setdefault("model", {})
+            config.setdefault("training", {})
 
             # 更新模型配置
             version_names = ["yolo11", "yolo9", "yolo8", "yolo12"]
             size_names = ["nano", "small", "medium", "large", "xlarge"]
             config["model"]["version"] = version_names[self.version_combo.currentIndex()]
             config["model"]["backbone"] = size_names[self.model_combo.currentIndex()]
+
+            # 更新任务
+            selected_task = self._get_selected_task()
+            config["task"] = selected_task
 
             # 更新训练参数（使用官方YOLO参数名）
             config["training"]["epochs"] = self.epochs_spin.value()
@@ -599,6 +528,10 @@ class TrainWidget(QWidget):
         # 模型版本或大小改变时，重新加载对应的配置文件
         self.version_combo.currentIndexChanged.connect(self.on_model_changed)
         self.model_combo.currentIndexChanged.connect(self.on_model_changed)
+        self.task_combo.currentIndexChanged.connect(self.on_task_changed)
+
+    def _get_selected_task(self) -> str:
+        return self.task_combo.currentData()
 
     def select_dataset(self):
         """选择数据集目录"""
@@ -618,11 +551,8 @@ class TrainWidget(QWidget):
                 QMessageBox.warning(
                     self,
                     "数据集错误",
-                    f"所选目录中未找到 data.yaml 文件。\n\n"
-                    f"请确保数据集目录包含:\n"
-                    f"  - data.yaml (数据集配置)\n"
-                    f"  - images/train/ (训练图片)\n"
-                    f"  - images/val/ (验证图片)",
+                    "所选目录中未找到 data.yaml 文件。\n\n"
+                    "请按照 YOLO 官方格式提供 data.yaml，并在其中定义 path/train/val。",
                 )
                 return
 
@@ -677,6 +607,7 @@ class TrainWidget(QWidget):
         self.select_data_btn.setEnabled(False)
         self.version_combo.setEnabled(False)  # 训练中禁用版本选择
         self.model_combo.setEnabled(False)  # 训练中禁用模型选择
+        self.task_combo.setEnabled(False)
 
         # 保持参数输入框可用，允许用户在训练过程中实时调整参数（下次训练生效）
         self.epochs_spin.setEnabled(True)
@@ -699,6 +630,16 @@ class TrainWidget(QWidget):
         self.dfl_loss_label.setText("0.0000")
         self.instances_label.setText("0")
         self.size_label.setText("640")
+        self.elapsed_label.setText("00:00:00")
+        self.eta_label.setText("--:--:--")
+
+        # 重置耗时统计
+        self.training_start_time = datetime.now()
+        self.last_epoch_number = None
+        self.last_epoch_timestamp = None
+        self.epoch_time_accum = 0.0
+        self.epoch_count = 0
+        self.total_epochs_seen = None
 
         # 创建并启动训练线程
         config_path = self._get_config_path()
@@ -735,6 +676,21 @@ class TrainWidget(QWidget):
             total_epochs = progress_data.get("total_epochs")
             if epoch is not None and total_epochs is not None:
                 self.epoch_label.setText(f"{epoch}/{total_epochs}")
+                self.total_epochs_seen = total_epochs
+
+                # 统计单epoch耗时
+                now = datetime.now()
+                if self.last_epoch_number is None:
+                    self.last_epoch_number = epoch
+                    self.last_epoch_timestamp = now
+                elif epoch != self.last_epoch_number:
+                    if self.last_epoch_timestamp:
+                        delta_sec = (now - self.last_epoch_timestamp).total_seconds()
+                        if delta_sec > 0:
+                            self.epoch_time_accum += delta_sec
+                            self.epoch_count += 1
+                    self.last_epoch_number = epoch
+                    self.last_epoch_timestamp = now
 
             # 更新 GPU 内存
             gpu_mem = progress_data.get("gpu_mem")
@@ -766,6 +722,18 @@ class TrainWidget(QWidget):
             if size is not None:
                 self.size_label.setText(f"{size}")
 
+            # 更新耗时与预计耗时
+            if self.training_start_time:
+                elapsed_sec = (datetime.now() - self.training_start_time).total_seconds()
+                self.elapsed_label.setText(self._format_duration(elapsed_sec))
+
+                if self.total_epochs_seen and self.epoch_count > 0:
+                    avg_epoch_sec = self.epoch_time_accum / self.epoch_count
+                    eta_total_sec = avg_epoch_sec * self.total_epochs_seen
+                    self.eta_label.setText(self._format_duration(eta_total_sec))
+                else:
+                    self.eta_label.setText("--:--:--")
+
             # 通知消费者处理新输出
             if self.train_thread.output_buffer:
                 captured_output = self.train_thread.output_buffer.getvalue()
@@ -788,10 +756,11 @@ class TrainWidget(QWidget):
             )
 
             if reply == QMessageBox.Yes:
-                self.log("\n⚠️ 正在停止训练...")
+                self.log("\n⚠️ 正在停止训练...")                
                 self.train_thread.stop()
                 self.train_thread.wait()
                 self.on_training_finished(False, "用户取消")
+                self.log("⚠️ 训练已停止。\n")
 
     def on_model_changed(self, index):
         """模型选择改变时的处理函数"""
@@ -799,6 +768,25 @@ class TrainWidget(QWidget):
             # 只在不训练时重新加载配置
             self.log(f"📋 模型已改变，加载对应的配置文件...")
             self._load_config()
+            self._update_task_combo_state()
+
+    def on_task_changed(self, index):
+        if not self.is_training:
+            selected = self._get_selected_task()
+            self.log(f"📋 已选择任务: {selected}")
+
+    def _update_task_combo_state(self):
+        """根据 YOLO 版本限制任务选项（仅 YOLO11 支持分割/分类/姿势/OBB）"""
+        allow_all = self.version_combo.currentIndex() == 0  # YOLO11
+        model = self.task_combo.model()
+        for i, (_, value) in enumerate(self.task_options):
+            item = model.item(i)
+            if item:
+                item.setEnabled(allow_all or value == "detect")
+
+        if not allow_all and self._get_selected_task() != "detect":
+            self.task_combo.setCurrentIndex(0)
+            self.log("⚠️  非 YOLO11 仅支持检测，已切换到检测任务")
 
     def on_training_finished(self, success, message):
         """训练完成回调"""
@@ -813,6 +801,7 @@ class TrainWidget(QWidget):
         self.select_data_btn.setEnabled(True)
         self.version_combo.setEnabled(True)  # 训练完成后重新启用版本选择
         self.model_combo.setEnabled(True)  # 训练完成后重新启用模型选择
+        self.task_combo.setEnabled(True)
 
         # 确保所有参数输入框保持启用
         self.epochs_spin.setEnabled(True)
@@ -843,3 +832,10 @@ class TrainWidget(QWidget):
         self.log_text.verticalScrollBar().setValue(
             self.log_text.verticalScrollBar().maximum()
         )
+
+    def _format_duration(self, seconds: float) -> str:
+        seconds = int(max(0, seconds))
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        return f"{h:02d}:{m:02d}:{s:02d}"

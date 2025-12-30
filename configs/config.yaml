@@ -1,6 +1,7 @@
 model:
-  backbone: small
+  backbone: nano
   version: yolo11
+task: detect
 training:
   amp: true
   batch: 32
@@ -8,7 +9,7 @@ training:
   close_mosaic: 10
   cls: 1.5
   dfl: 1.5
-  epochs: 30
+  epochs: 6
   imgsz: 640
   lr0: 0.001
   patience: 15

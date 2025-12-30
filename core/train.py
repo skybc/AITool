@@ -55,7 +55,14 @@ class YoloDetector:
         # 合并配置：用户配置优先
         if user_config:
             self._merge_config(self.config, user_config)
-        
+
+        # 确保关键配置存在
+        self.config.setdefault('model', {})
+        self.config.setdefault('training', {})
+        self.task = self.config.get('task', 'detect')
+        self.model_version = self.config['model'].get('version', 'yolo11')
+        self.run_name = f"{self.model_version}_{self.task}"
+
         # 确定设备
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
@@ -92,40 +99,74 @@ class YoloDetector:
     
     def _init_model(self):
         """初始化YOLO模型"""
-        model_type = self.config['model'].get('version', 'yolo11')  # 模型类型
+        model_type = self.model_version  # 模型类型
         backbone = self.config['model'].get('backbone', 'small')  # nano/small/medium/large/xlarge
-        
-        # 模型名称映射表
-        # {版本: {大小: 模型文件名}}
-        # 注意：每个版本的命名规律略有不同
+
+        # 模型名称映射表，按任务拆分（YOLO11 支持 detect/segment/classify/pose/obb，其它版本仅 detect）
         model_name_map = {
             'yolo11': {
-                'nano': 'yolo11n.pt',      # yolo11n
-                'small': 'yolo11s.pt',     # yolo11s
-                'medium': 'yolo11m.pt',    # yolo11m
-                'large': 'yolo11l.pt',     # yolo11l
-                'xlarge': 'yolo11x.pt',    # yolo11x
+                'detect': {
+                    'nano': 'yolo11n.pt',
+                    'small': 'yolo11s.pt',
+                    'medium': 'yolo11m.pt',
+                    'large': 'yolo11l.pt',
+                    'xlarge': 'yolo11x.pt',
+                },
+                'segment': {
+                    'nano': 'yolo11n-seg.pt',
+                    'small': 'yolo11s-seg.pt',
+                    'medium': 'yolo11m-seg.pt',
+                    'large': 'yolo11l-seg.pt',
+                    'xlarge': 'yolo11x-seg.pt',
+                },
+                'classify': {
+                    'nano': 'yolo11n-cls.pt',
+                    'small': 'yolo11s-cls.pt',
+                    'medium': 'yolo11m-cls.pt',
+                    'large': 'yolo11l-cls.pt',
+                    'xlarge': 'yolo11x-cls.pt',
+                },
+                'pose': {
+                    'nano': 'yolo11n-pose.pt',
+                    'small': 'yolo11s-pose.pt',
+                    'medium': 'yolo11m-pose.pt',
+                    'large': 'yolo11l-pose.pt',
+                    'xlarge': 'yolo11x-pose.pt',
+                },
+                'obb': {
+                    'nano': 'yolo11n-obb.pt',
+                    'small': 'yolo11s-obb.pt',
+                    'medium': 'yolo11m-obb.pt',
+                    'large': 'yolo11l-obb.pt',
+                    'xlarge': 'yolo11x-obb.pt',
+                },
             },
             'yolo9': {
-                'nano': 'yolov9t.pt',      # yolov9t (tiny)
-                'small': 'yolov9s.pt',     # yolov9s
-                'medium': 'yolov9m.pt',    # yolov9m
-                'large': 'yolov9c.pt',     # yolov9c (compact)
-                'xlarge': 'yolov9e.pt',    # yolov9e (extra)
+                'detect': {
+                    'nano': 'yolov9t.pt',
+                    'small': 'yolov9s.pt',
+                    'medium': 'yolov9m.pt',
+                    'large': 'yolov9c.pt',
+                    'xlarge': 'yolov9e.pt',
+                }
             },
             'yolo8': {
-                'nano': 'yolov8n.pt',      # yolov8n
-                'small': 'yolov8s.pt',     # yolov8s
-                'medium': 'yolov8m.pt',    # yolov8m
-                'large': 'yolov8l.pt',     # yolov8l
-                'xlarge': 'yolov8x.pt',    # yolov8x
+                'detect': {
+                    'nano': 'yolov8n.pt',
+                    'small': 'yolov8s.pt',
+                    'medium': 'yolov8m.pt',
+                    'large': 'yolov8l.pt',
+                    'xlarge': 'yolov8x.pt',
+                }
             },
             'yolo12': {
-                'nano': 'yolo12n.pt',      # yolo12n
-                'small': 'yolo12s.pt',     # yolo12s
-                'medium': 'yolo12m.pt',    # yolo12m
-                'large': 'yolo12l.pt',     # yolo12l
-                'xlarge': 'yolo12x.pt',    # yolo12x
+                'detect': {
+                    'nano': 'yolo12n.pt',
+                    'small': 'yolo12s.pt',
+                    'medium': 'yolo12m.pt',
+                    'large': 'yolo12l.pt',
+                    'xlarge': 'yolo12x.pt',
+                }
             },
         }
 
@@ -137,14 +178,18 @@ class YoloDetector:
             'yolo12': '12',
         }
 
-        # 获取模型文件名和配置文件名
+        # 检查任务支持情况
         if model_type not in model_name_map:
             raise ValueError(f"不支持的模型类型: {model_type}。支持的类型: {list(model_name_map.keys())}")
-        
-        if backbone not in model_name_map[model_type]:
-            raise ValueError(f"{model_type} 不支持 {backbone} 大小。支持的大小: {list(model_name_map[model_type].keys())}")
-        
-        model_file_name = model_name_map[model_type][backbone]
+
+        task_map = model_name_map[model_type]
+        if self.task not in task_map:
+            raise ValueError(f"{model_type} 不支持任务 {self.task}。YOLO11 支持 detect/segment/classify/pose/obb，其它仅支持 detect")
+
+        if backbone not in task_map[self.task]:
+            raise ValueError(f"{model_type} 不支持 {backbone} 大小。支持的大小: {list(task_map[self.task].keys())}")
+
+        model_file_name = task_map[self.task][backbone]
         version_dir = version_dir_map.get(model_type, '11')
         
         # 从对应版本目录加载预训练权重
@@ -158,16 +203,8 @@ class YoloDetector:
        
         
         self.model = YOLO(str(model_path))
-        self.log(f"✅ 已加载预训练模型: {model_path} ({model_type} - {backbone})")
-        
-        # 设置为目标检测任务
-        self.model.task = 'detect'
-    
-    def log(self, message: str):
-        """记录日志"""
-        print(message)
-        with open(self.log_file, 'a', encoding='utf-8') as f:
-            f.write(message + '\n')
+        self.model.task = self.task
+        self.log(f"✅ 已加载预训练模型: {model_path} ({model_type} - {backbone}, 任务: {self.task})")
     
     def _fix_data_yaml_path(self, data_yaml_path: Path, dataset_root: Path):
         """修复 data.yaml 中的路径，确保 YOLO11 能正确找到图片 
@@ -177,7 +214,7 @@ class YoloDetector:
         """
         try:
             with open(data_yaml_path, 'r', encoding='utf-8') as f:
-                data_config = yaml.safe_load(f)
+                data_config = yaml.safe_load(f) or {}
             
             # 获取当前的路径配置
             current_path = data_config.get('path', '.')
@@ -206,13 +243,13 @@ class YoloDetector:
             resume: 恢复训练的权重路径
         """
         cfg = self.config
+        task = self.task
+        run_name = self.run_name
         
         # 训练参数
         epochs = cfg['training']['epochs']
         batch_size = cfg['training']['batch']
         lr = cfg['training']['lr0']
-        device = str(self.device).replace('cuda:', '')  # YOLO11 需要 '0' 而不是 'cuda:0'
-        
         # 使用已准备好的 data.yaml
         dataset_root = Path(dataset_root).resolve()  # 获取绝对路径
         data_yaml_path = dataset_root / 'data.yaml'
@@ -229,40 +266,48 @@ class YoloDetector:
         self.log(f"  - 迭代数: {epochs}")
         self.log(f"  - 批次大小: {batch_size}")
         self.log(f"  - 学习率: {lr}")
+        self.log(f"  - 任务: {task}")
             
-        # 使用官方训练接口
-        results = self.model.train(
-            data=str(data_yaml_path),
-            epochs=epochs,
-            imgsz=cfg['training']['imgsz'],
-            batch=batch_size,
-            device=0 if self.device.type == 'cuda' else 'cpu',
-            lr0=lr,
-            lrf=0.01,  # 最终学习率
-            momentum=0.937,
-            weight_decay=cfg['training']['weight_decay'],
-            warmup_epochs=cfg['training']['warmup_epochs'],
-            warmup_momentum=0.8,
-            warmup_bias_lr=0.1,
-            box=cfg['training']['box'],
-            cls=cfg['training']['cls'],
-            dfl=cfg['training']['dfl'],
-            patience=cfg['training']['patience'],
-            close_mosaic=cfg['training']['close_mosaic'],
-            project=str(self.output_dir),
-            name='yolo11_defect',
-            exist_ok=True,
-            resume=resume is not None,
-            save=True,
-            save_period=1,
-            seed=42,
-            deterministic=True,
-            verbose=True,
-            amp=cfg['training']['amp'],  # 混合精度
-        )
+        # 组装训练参数
+        train_kwargs = {
+            'data': str(data_yaml_path),
+            'epochs': epochs,
+            'imgsz': cfg['training']['imgsz'],
+            'batch': batch_size,
+            'device': 0 if self.device.type == 'cuda' else 'cpu',
+            'lr0': lr,
+            'lrf': 0.01,
+            'momentum': 0.937,
+            'weight_decay': cfg['training']['weight_decay'],
+            'warmup_epochs': cfg['training']['warmup_epochs'],
+            'warmup_momentum': 0.8,
+            'warmup_bias_lr': 0.1,
+            'patience': cfg['training']['patience'],
+            'project': str(self.output_dir),
+            'name': run_name,
+            'exist_ok': True,
+            'resume': resume is not None,
+            'save': True,
+            'save_period': 1,
+            'seed': 42,
+            'deterministic': True,
+            'verbose': True,
+            'amp': cfg['training']['amp'],
+        }
+
+        # 检测相关损失只在检测类任务启用
+        if task in ['detect', 'segment', 'pose', 'obb']:
+            train_kwargs.update({
+                'box': cfg['training']['box'],
+                'cls': cfg['training']['cls'],
+                'dfl': cfg['training']['dfl'],
+                'close_mosaic': cfg['training']['close_mosaic'],
+            })
+
+        results = self.model.train(**train_kwargs)
         
         # 保存最优模型到结果目录和数据目录
-        best_model_path = self.output_dir / 'yolo11_defect' / 'weights' / 'best.pt'
+        best_model_path = self.output_dir / run_name / 'weights' / 'best.pt'
         if best_model_path.exists():
             import shutil
             
@@ -281,7 +326,7 @@ class YoloDetector:
             self.log(f"✅ 最优模型已拷贝到: {data_model_path}")
             
             # 3. 同时拷贝最后一个epoch的模型
-            last_model_path = self.output_dir / 'yolo11_defect' / 'weights' / 'last.pt'
+            last_model_path = self.output_dir / run_name / 'weights' / 'last.pt'
             if last_model_path.exists():
                 last_copy_path = data_model_dir / 'last.pt'
                 shutil.copy(last_model_path, last_copy_path)
@@ -306,18 +351,32 @@ class YoloDetector:
             return False
         
         with open(data_yaml_path, 'r', encoding='utf-8') as f:
-            data_config = yaml.safe_load(f)
+            data_config = yaml.safe_load(f) or {}
         
+        task = self.task
+
         # 验证必要的字段
-        required_fields = ['path', 'train', 'val', 'nc', 'names']
+        if task == 'classify':
+            required_fields = ['path', 'train', 'val', 'names']
+        else:
+            required_fields = ['path', 'train', 'val', 'nc', 'names']
+
         for field in required_fields:
             if field not in data_config:
                 self.log(f"❌ data.yaml 缺少字段: {field}")
                 return False
-        
+
+        base_path = Path(data_config.get('path', '.'))
+        if not base_path.is_absolute():
+            base_path = (dataset_root / base_path).resolve()
+
+        def _resolve(p):
+            p_obj = Path(p)
+            return p_obj if p_obj.is_absolute() else (base_path / p_obj)
+
         # 验证数据集目录
-        train_dir = dataset_root / data_config['train']
-        val_dir = dataset_root / data_config['val']
+        train_dir = _resolve(data_config['train'])
+        val_dir = _resolve(data_config['val'])
         
         if not train_dir.exists():
             self.log(f"❌ 训练数据集目录不存在: {train_dir}")
@@ -358,8 +417,13 @@ class YoloDetector:
         metrics = model.val(data=str(data_yaml), device=0 if self.device.type == 'cuda' else 'cpu')
         
         self.log(f"\n✅ 评估完成!")
-        self.log(f"  - mAP@0.5: {metrics.box.map50:.4f}")
-        self.log(f"  - mAP@0.5:0.95: {metrics.box.map:.4f}")
+        if hasattr(metrics, 'top1'):
+            self.log(f"  - top1: {metrics.top1:.4f}")
+            if hasattr(metrics, 'top5'):
+                self.log(f"  - top5: {metrics.top5:.4f}")
+        elif hasattr(metrics, 'box'):
+            self.log(f"  - mAP@0.5: {metrics.box.map50:.4f}")
+            self.log(f"  - mAP@0.5:0.95: {metrics.box.map:.4f}")
         
         return metrics
 
