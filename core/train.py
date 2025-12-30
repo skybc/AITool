@@ -21,8 +21,8 @@ import json
 from ultralytics import YOLO
 from ultralytics.utils.metrics import box_iou
 
-
-class DefectDetector:
+# 工业缺陷检测训练器
+class YoloDetector:
     """工业缺陷检测训练器"""
     
     def __init__(self, config_path: str, output_dir: str = './results'):
@@ -32,10 +32,6 @@ class DefectDetector:
             config_path: 配置文件路径
             output_dir: 输出目录
         """
-        # 加载配置
-        with open(config_path, 'r', encoding='utf-8') as f:
-            self.config = yaml.safe_load(f)
-        
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
@@ -43,12 +39,25 @@ class DefectDetector:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         self.log_file = self.output_dir / f'train_log_{timestamp}.txt'
         
+        # 首先加载YOLO全部配置
+        all_configs_path = Path('configs/all_configs.yaml')
+        if all_configs_path.exists():
+            with open(all_configs_path, 'r', encoding='utf-8') as f:
+                self.config = yaml.safe_load(f)
+            self.log(f"✅ 已加载默认配置: {all_configs_path}")
+        else:
+            self.config = {}
+        
+        # 然后加载用户配置，覆盖默认配置
+        with open(config_path, 'r', encoding='utf-8') as f:
+            user_config = yaml.safe_load(f)
+        
+        # 合并配置：用户配置优先
+        if user_config:
+            self._merge_config(self.config, user_config)
+        
         # 确定设备
-        self.device = torch.device(
-            self.config['training']['device'] 
-            if torch.cuda.is_available() 
-            else 'cpu'
-        )
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         # 用于存储 trainer 引用的变量（供 GUI 轮询使用）
         self.trainer_ref = None
@@ -60,10 +69,31 @@ class DefectDetector:
         # 初始化模型
         self._init_model()
     
+    def log(self, message: str):
+        """记录日志"""
+        print(message)
+        with open(self.log_file, 'a', encoding='utf-8') as f:
+            f.write(message + '\n')
+    
+    def _merge_config(self, base_config: dict, user_config: dict) -> None:
+        """合并配置字典，用户配置优先
+        
+        参数:
+            base_config: 基础配置
+            user_config: 用户配置
+        """
+        for key, value in user_config.items():
+            if key in base_config and isinstance(base_config[key], dict) and isinstance(value, dict):
+                # 递归合并嵌套字典
+                self._merge_config(base_config[key], value)
+            else:
+                # 用户配置覆盖基础配置
+                base_config[key] = value
+    
     def _init_model(self):
         """初始化YOLO模型"""
-        model_type = self.config['model'].get('type', 'yolo11')  # 模型类型
-        backbone = self.config['model']['backbone']  # nano/small/medium/large/xlarge
+        model_type = self.config['model'].get('version', 'yolo11')  # 模型类型
+        backbone = self.config['model'].get('backbone', 'small')  # nano/small/medium/large/xlarge
         
         # 模型名称映射表
         # {版本: {大小: 模型文件名}}
@@ -98,40 +128,7 @@ class DefectDetector:
                 'xlarge': 'yolo12x.pt',    # yolo12x
             },
         }
-        
-        # 配置文件名映射表
-        # 根据模型文件名的最后一个字符确定config文件名
-        config_name_map = {
-            'yolo11': {
-                'nano': 'config_n.yaml',      # yolo11n -> config_n
-                'small': 'config_s.yaml',     # yolo11s -> config_s
-                'medium': 'config_m.yaml',    # yolo11m -> config_m
-                'large': 'config_l.yaml',     # yolo11l -> config_l
-                'xlarge': 'config_x.yaml',    # yolo11x -> config_x
-            },
-            'yolo9': {
-                'nano': 'config_t.yaml',      # yolov9t -> config_t
-                'small': 'config_s.yaml',     # yolov9s -> config_s
-                'medium': 'config_m.yaml',    # yolov9m -> config_m
-                'large': 'config_c.yaml',     # yolov9c -> config_c
-                'xlarge': 'config_e.yaml',    # yolov9e -> config_e
-            },
-            'yolo8': {
-                'nano': 'config_n.yaml',      # yolov8n -> config_n
-                'small': 'config_s.yaml',     # yolov8s -> config_s
-                'medium': 'config_m.yaml',    # yolov8m -> config_m
-                'large': 'config_l.yaml',     # yolov8l -> config_l
-                'xlarge': 'config_x.yaml',    # yolov8x -> config_x
-            },
-            'yolo12': {
-                'nano': 'config_n.yaml',      # yolo12n -> config_n
-                'small': 'config_s.yaml',     # yolo12s -> config_s
-                'medium': 'config_m.yaml',    # yolo12m -> config_m
-                'large': 'config_l.yaml',     # yolo12l -> config_l
-                'xlarge': 'config_x.yaml',    # yolo12x -> config_x
-            },
-        }
-        
+
         # 版本到目录映射
         version_dir_map = {
             'yolo11': '11',
@@ -139,7 +136,7 @@ class DefectDetector:
             'yolo8': '8',
             'yolo12': '12',
         }
-        
+
         # 获取模型文件名和配置文件名
         if model_type not in model_name_map:
             raise ValueError(f"不支持的模型类型: {model_type}。支持的类型: {list(model_name_map.keys())}")
@@ -148,27 +145,20 @@ class DefectDetector:
             raise ValueError(f"{model_type} 不支持 {backbone} 大小。支持的大小: {list(model_name_map[model_type].keys())}")
         
         model_file_name = model_name_map[model_type][backbone]
-        config_file_name = config_name_map[model_type][backbone]
         version_dir = version_dir_map.get(model_type, '11')
         
         # 从对应版本目录加载预训练权重
         yolopt_dir = Path('yolopt') / version_dir
         model_path = yolopt_dir / model_file_name
-        config_path = yolopt_dir / config_file_name
-        
         if not model_path.exists():
             self.log(f"⚠️  预训练模型不存在: {model_path}")
             self.log(f"💡 请先运行: python download_models.py")
             raise FileNotFoundError(f"模型文件不存在: {model_path}")
         
-        if not config_path.exists():
-            self.log(f"⚠️  配置文件不存在: {config_path}")
-            self.log(f"💡 请检查配置文件: {config_path}")
-            raise FileNotFoundError(f"配置文件不存在: {config_path}")
+       
         
         self.model = YOLO(str(model_path))
         self.log(f"✅ 已加载预训练模型: {model_path} ({model_type} - {backbone})")
-        self.log(f"✅ 已加载配置文件: {config_path}")
         
         # 设置为目标检测任务
         self.model.task = 'detect'
@@ -180,8 +170,7 @@ class DefectDetector:
             f.write(message + '\n')
     
     def _fix_data_yaml_path(self, data_yaml_path: Path, dataset_root: Path):
-        """修复 data.yaml 中的路径，确保 YOLO11 能正确找到图片
-        
+        """修复 data.yaml 中的路径，确保 YOLO11 能正确找到图片 
         参数:
             data_yaml_path: data.yaml 文件路径
             dataset_root: 数据集根目录
@@ -220,8 +209,8 @@ class DefectDetector:
         
         # 训练参数
         epochs = cfg['training']['epochs']
-        batch_size = cfg['training']['batch_size']
-        lr = cfg['training']['learning_rate']
+        batch_size = cfg['training']['batch']
+        lr = cfg['training']['lr0']
         device = str(self.device).replace('cuda:', '')  # YOLO11 需要 '0' 而不是 'cuda:0'
         
         # 使用已准备好的 data.yaml
@@ -245,7 +234,7 @@ class DefectDetector:
         results = self.model.train(
             data=str(data_yaml_path),
             epochs=epochs,
-            imgsz=640,
+            imgsz=cfg['training']['imgsz'],
             batch=batch_size,
             device=0 if self.device.type == 'cuda' else 'cpu',
             lr0=lr,
@@ -255,21 +244,21 @@ class DefectDetector:
             warmup_epochs=cfg['training']['warmup_epochs'],
             warmup_momentum=0.8,
             warmup_bias_lr=0.1,
-            box=cfg['loss']['box_loss_weight'],
-            cls=cfg['loss']['cls_loss_weight'],
-            dfl=cfg['loss']['dfl_loss_weight'],
-            patience=15,  # 早停耐心
-            close_mosaic=10,  # 最后10个epoch关闭Mosaic
+            box=cfg['training']['box'],
+            cls=cfg['training']['cls'],
+            dfl=cfg['training']['dfl'],
+            patience=cfg['training']['patience'],
+            close_mosaic=cfg['training']['close_mosaic'],
             project=str(self.output_dir),
             name='yolo11_defect',
             exist_ok=True,
             resume=resume is not None,
             save=True,
-            save_period=cfg['output']['save_interval'],
+            save_period=1,
             seed=42,
             deterministic=True,
             verbose=True,
-            amp=cfg['training']['mixed_precision'],  # 混合精度
+            amp=cfg['training']['amp'],  # 混合精度
         )
         
         # 保存最优模型到结果目录和数据目录
@@ -388,7 +377,7 @@ def main():
     args = parser.parse_args()
     
     # 创建训练器
-    trainer = DefectDetector(args.config, args.output)
+    trainer = YoloDetector(args.config, args.output)
     
     if args.eval:
         # 只评估
